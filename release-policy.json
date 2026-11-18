@@ -1,5 +1,5 @@
 {
-  "visibility": "private",
+  "visibility": "public",
   "license": "MIT",
-  "publication_allowed": false
+  "publication_allowed": true
 }
