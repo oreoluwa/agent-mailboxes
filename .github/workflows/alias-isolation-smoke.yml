@@ -1,0 +1,83 @@
+name: Alias Isolation Smoke
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - ".github/workflows/alias-isolation-smoke.yml"
+      - "cmd/emaild/**"
+      - "internal/api/**"
+      - "internal/auth/**"
+      - "internal/config/**"
+      - "internal/imapingest/**"
+      - "internal/mimeparse/**"
+      - "internal/model/**"
+      - "internal/router/**"
+      - "internal/service/**"
+      - "internal/smtpclient/**"
+      - "internal/store/**"
+      - "migrations/**"
+      - "scripts/alias-isolation-smoke.py"
+      - "scripts/mailbox-onboard.py"
+      - "scripts/prepare-zoho-pilot.py"
+      - "scripts/test-mailbox-onboard.py"
+      - "scripts/uidvalidity-integration.sh"
+      - "scripts/agent-store-integration.sh"
+      - "go.mod"
+      - "go.sum"
+  pull_request:
+    paths:
+      - ".github/workflows/alias-isolation-smoke.yml"
+      - "cmd/emaild/**"
+      - "internal/api/**"
+      - "internal/auth/**"
+      - "internal/config/**"
+      - "internal/imapingest/**"
+      - "internal/mimeparse/**"
+      - "internal/model/**"
+      - "internal/router/**"
+      - "internal/service/**"
+      - "internal/smtpclient/**"
+      - "internal/store/**"
+      - "migrations/**"
+      - "scripts/alias-isolation-smoke.py"
+      - "scripts/mailbox-onboard.py"
+      - "scripts/prepare-zoho-pilot.py"
+      - "scripts/test-mailbox-onboard.py"
+      - "scripts/uidvalidity-integration.sh"
+      - "scripts/agent-store-integration.sh"
+      - "go.mod"
+      - "go.sum"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  alias-isolation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify private credential entry
+        run: python3 scripts/test-mailbox-onboard.py
+
+      - name: Run isolated two-agent smoke
+        run: python3 scripts/alias-isolation-smoke.py
+
+      - name: Verify database upgrade and mailbox resets
+        run: ./scripts/uidvalidity-integration.sh
+
+      - name: Verify agent isolation and draft delivery recovery
+        run: ./scripts/agent-store-integration.sh

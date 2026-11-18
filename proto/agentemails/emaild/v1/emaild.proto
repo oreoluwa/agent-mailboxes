@@ -1,0 +1,571 @@
+syntax = "proto3";
+
+package agentemails.emaild.v1;
+
+option go_package = "github.com/oreoluwa/agent-mailboxes/proto/agentemails/emaild/v1;emaildv1";
+
+import "google/protobuf/timestamp.proto";
+
+service EmailService {
+  rpc ListFolders(ListFoldersRequest) returns (ListFoldersResponse);
+  rpc ListInbox(ListInboxRequest) returns (ListInboxResponse);
+  rpc ReadMessage(ReadMessageRequest) returns (ReadMessageResponse);
+  rpc GetMessageBody(GetMessageBodyRequest) returns (GetMessageBodyResponse);
+  rpc GetRawMessage(GetRawMessageRequest) returns (GetRawMessageResponse);
+  rpc SearchMessages(SearchMessagesRequest) returns (SearchMessagesResponse);
+  rpc SearchStructured(SearchStructuredRequest) returns (SearchStructuredResponse);
+  rpc SendMessage(SendMessageRequest) returns (QueuedResponse);
+  rpc SendRawMessage(SendRawMessageRequest) returns (QueuedResponse);
+  rpc ReplyMessage(ReplyMessageRequest) returns (QueuedResponse);
+  rpc AckMessage(AckMessageRequest) returns (AckMessageResponse);
+  rpc UnackMessage(UnackMessageRequest) returns (UnackMessageResponse);
+  rpc StreamMailboxEvents(StreamMailboxEventsRequest) returns (stream MailboxEvent);
+  rpc ListDrafts(ListDraftsRequest) returns (ListDraftsResponse);
+  rpc GetDraft(GetDraftRequest) returns (GetDraftResponse);
+  rpc CreateDraft(CreateDraftRequest) returns (CreateDraftResponse);
+  rpc ReviseDraft(ReviseDraftRequest) returns (ReviseDraftResponse);
+  rpc DiscardDraft(DiscardDraftRequest) returns (DiscardDraftResponse);
+  rpc SendFromDraft(SendFromDraftRequest) returns (SendFromDraftResponse);
+  rpc RunAgent(RunAgentRequest) returns (RunAgentResponse);
+  rpc ListAgentConversations(ListAgentConversationsRequest) returns (ListAgentConversationsResponse);
+  rpc GetAgentConversation(GetAgentConversationRequest) returns (GetAgentConversationResponse);
+  rpc GetMailboxAgentContext(GetMailboxAgentContextRequest) returns (GetMailboxAgentContextResponse);
+  rpc GetMailboxAgentSettings(GetMailboxAgentSettingsRequest) returns (GetMailboxAgentSettingsResponse);
+  rpc UpdateMailboxAgentSettings(UpdateMailboxAgentSettingsRequest) returns (UpdateMailboxAgentSettingsResponse);
+}
+
+message ListFoldersRequest {
+  string mailbox_name = 1;
+}
+
+message ListFoldersResponse {
+  repeated Folder folders = 1;
+}
+
+message Folder {
+  string name = 1;
+  string display_name = 2;
+  string role = 3;
+  int32 total = 4;
+  int32 unread = 5;
+}
+
+message ListInboxRequest {
+  string mailbox_name = 1;
+  string folder = 2;
+  bool unread = 3;
+  int32 limit = 4;
+}
+
+message ListInboxResponse {
+  repeated MessageSummary items = 1;
+}
+
+message ReadMessageRequest {
+  string mailbox_name = 1;
+  string message_id = 2;
+}
+
+message ReadMessageResponse {
+  Message message = 1;
+}
+
+message GetMessageBodyRequest {
+  string mailbox_name = 1;
+  string message_id = 2;
+}
+
+message GetMessageBodyResponse {
+  MessageBody body = 1;
+}
+
+message GetRawMessageRequest {
+  string mailbox_name = 1;
+  string message_id = 2;
+}
+
+message GetRawMessageResponse {
+  bytes rfc822 = 1;
+}
+
+message SearchMessagesRequest {
+  string mailbox_name = 1;
+  string query = 2;
+  string folder = 3;
+  int32 limit = 4;
+}
+
+message SearchMessagesResponse {
+  repeated MessageSummary items = 1;
+}
+
+message SearchStructuredRequest {
+  string mailbox_name = 1;
+  SearchRequest request = 2;
+}
+
+message SearchStructuredResponse {
+  repeated MessageSummary items = 1;
+}
+
+message SendMessageRequest {
+  string mailbox_name = 1;
+  repeated string to = 2;
+  string subject = 3;
+  string body = 4;
+  string idempotency_key = 5;
+}
+
+message SendRawMessageRequest {
+  string mailbox_name = 1;
+  string from = 2;
+  repeated string to = 3;
+  bytes raw_rfc822 = 4;
+  string idempotency_key = 5;
+}
+
+message ReplyMessageRequest {
+  string mailbox_name = 1;
+  string message_id = 2;
+  string body = 3;
+  string idempotency_key = 4;
+}
+
+message AckMessageRequest {
+  string mailbox_name = 1;
+  string message_id = 2;
+}
+
+message AckMessageResponse {
+  string status = 1;
+}
+
+message UnackMessageRequest {
+  string mailbox_name = 1;
+  string message_id = 2;
+}
+
+message UnackMessageResponse {
+  string status = 1;
+}
+
+message QueuedResponse {
+  string status = 1;
+  string job_id = 2;
+}
+
+message StreamMailboxEventsRequest {
+  string mailbox_name = 1;
+}
+
+message MailboxEvent {
+  string mailbox_name = 1;
+  string mailbox_id = 2;
+  string event_type = 3;
+  string message_id = 4;
+  google.protobuf.Timestamp occurred_at = 5;
+  string cursor = 6;
+  optional string subject = 7;
+}
+
+message MessageSummary {
+  string msg_id = 1;
+  string folder = 2;
+  google.protobuf.Timestamp received_at = 3;
+  From from = 4;
+  optional string subject = 5;
+  bool seen = 6;
+  Digest digest = 7;
+  int32 attachments_count = 8;
+  string body_state = 9;
+  Thread thread = 10;
+}
+
+message Message {
+  string msg_id = 1;
+  optional string rfc_message_id = 2;
+  google.protobuf.Timestamp received_at = 3;
+  optional google.protobuf.Timestamp sent_date = 4;
+  string from_email = 5;
+  optional string from_name = 6;
+  optional string subject = 7;
+  optional string snippet = 8;
+  string body_state = 9;
+  optional string in_reply_to = 10;
+  optional string references = 11;
+  optional Digest digest = 12;
+  repeated Attachment attachments = 13;
+  Thread thread = 14;
+  From from = 15;
+}
+
+message MessageBody {
+  string message_id = 1;
+  optional string text_plain = 2;
+  optional string text_html = 3;
+  optional string extracted_text = 4;
+}
+
+message From {
+  optional string name = 1;
+  string email = 2;
+}
+
+message Thread {
+  string message_id = 1;
+  optional string in_reply_to = 2;
+  optional string references = 3;
+}
+
+message Attachment {
+  string id = 1;
+  string message_id = 2;
+  string filename = 3;
+  string mime = 4;
+  int64 size_bytes = 5;
+  optional string storage_path = 6;
+  optional google.protobuf.Timestamp created_at = 7;
+}
+
+message Digest {
+  string message_id = 1;
+  string model_name = 2;
+  string summary_short = 3;
+  repeated string summary_bullets = 4;
+  string intent = 5;
+  string priority = 6;
+  string required_action = 7;
+  string suggested_next_step = 8;
+  string extracted_entities_json = 9;
+  double confidence = 10;
+  optional google.protobuf.Timestamp created_at = 11;
+}
+
+message SearchRequest {
+  string folder = 1;
+  int32 limit = 2;
+  SearchFilters filters = 3;
+  SearchIntent intent = 4;
+  string mode = 5;
+  string parser_mode = 6;
+}
+
+message SearchFilters {
+  SearchHeaderFilters headers = 1;
+  SearchFlagFilters flags = 2;
+  SearchDateFilters date = 3;
+  SearchSizeFilters size = 4;
+  SearchLogic logic = 5;
+}
+
+message SearchHeaderFilters {
+  repeated string subject = 1;
+  repeated string from = 2;
+  repeated string to = 3;
+  repeated string message_id = 4;
+  repeated SearchGenericHeader generic = 5;
+}
+
+message SearchGenericHeader {
+  string name = 1;
+  repeated string values = 2;
+}
+
+message SearchFlagFilters {
+  repeated string with = 1;
+  repeated string without = 2;
+}
+
+message SearchDateFilters {
+  optional google.protobuf.Timestamp internal_since = 1;
+  optional google.protobuf.Timestamp internal_before = 2;
+  optional google.protobuf.Timestamp sent_since = 3;
+  optional google.protobuf.Timestamp sent_before = 4;
+  string field = 5;
+  optional SearchDateRange range = 6;
+  optional SearchTemporalFilter temporal = 7;
+}
+
+message SearchDateRange {
+  optional SearchTemporalPoint start = 1;
+  optional SearchTemporalPoint end = 2;
+  bool end_inclusive = 3;
+}
+
+message SearchTemporalPoint {
+  string type = 1;
+  string value = 2;
+  string timestamp = 3;
+  string date = 4;
+  string direction = 5;
+  int32 amount = 6;
+  string unit = 7;
+  string weekday = 8;
+  string period = 9;
+  string boundary = 10;
+  string snap = 11;
+  string timezone = 12;
+}
+
+message SearchTemporalFilter {
+  string kind = 1;
+  string value = 2;
+  int32 amount = 3;
+  string unit = 4;
+  string field = 5;
+  string timezone = 6;
+  string date = 7;
+}
+
+message SearchSizeFilters {
+  optional int64 larger = 1;
+  optional int64 smaller = 2;
+}
+
+message SearchLogic {
+  repeated SearchSubquery not = 1;
+  repeated SearchOrClause or = 2;
+}
+
+message SearchSubquery {
+  SearchFilters filters = 1;
+  SearchIntent intent = 2;
+}
+
+message SearchOrClause {
+  repeated SearchSubquery any = 1;
+}
+
+message SearchIntent {
+  string text = 1;
+  repeated string body_terms = 2;
+  SearchHeaderIntent header_terms = 3;
+}
+
+message SearchHeaderIntent {
+  repeated string subject = 1;
+  repeated string from = 2;
+  repeated string to = 3;
+}
+
+message ListDraftsRequest {
+  string mailbox_name = 1;
+  optional string source_message_id = 2;
+  string status = 3;
+  int32 limit = 4;
+}
+
+message ListDraftsResponse {
+  repeated Draft drafts = 1;
+}
+
+message GetDraftRequest {
+  string mailbox_name = 1;
+  string draft_id = 2;
+}
+
+message GetDraftResponse {
+  Draft draft = 1;
+}
+
+message CreateDraftRequest {
+  string mailbox_name = 1;
+  optional string source_message_id = 2;
+  optional string conversation_id = 3;
+  string subject = 4;
+  repeated string to = 5;
+  string body = 6;
+}
+
+message CreateDraftResponse {
+  Draft draft = 1;
+}
+
+message ReviseDraftRequest {
+  string mailbox_name = 1;
+  string draft_id = 2;
+  string subject = 3;
+  repeated string to = 4;
+  string body = 5;
+}
+
+message ReviseDraftResponse {
+  Draft draft = 1;
+}
+
+message DiscardDraftRequest {
+  string mailbox_name = 1;
+  string draft_id = 2;
+}
+
+message DiscardDraftResponse {
+  Draft draft = 1;
+}
+
+message SendFromDraftRequest {
+  string mailbox_name = 1;
+  string draft_id = 2;
+  string reviewed_revision_id = 3;
+}
+
+message SendFromDraftResponse {
+  string status = 1;
+  string job_id = 2;
+  Draft draft = 3;
+  bool idempotent = 4;
+}
+
+message RunAgentRequest {
+  string mailbox_name = 1;
+  optional string conversation_id = 2;
+  optional string message_id = 3;
+  string prompt = 4;
+  optional string actor_user_id = 5;
+}
+
+message RunAgentResponse {
+  AgentConversation conversation = 1;
+  optional Draft draft = 2;
+}
+
+message ListAgentConversationsRequest {
+  string mailbox_name = 1;
+  optional string message_id = 2;
+  int32 limit = 3;
+}
+
+message ListAgentConversationsResponse {
+  repeated AgentConversation conversations = 1;
+}
+
+message GetAgentConversationRequest {
+  string mailbox_name = 1;
+  string conversation_id = 2;
+}
+
+message GetAgentConversationResponse {
+  AgentConversation conversation = 1;
+}
+
+message GetMailboxAgentContextRequest {
+  string mailbox_name = 1;
+}
+
+message GetMailboxAgentContextResponse {
+  MailboxAgentContext context = 1;
+}
+
+message GetMailboxAgentSettingsRequest {
+  string mailbox_name = 1;
+}
+
+message GetMailboxAgentSettingsResponse {
+  MailboxAgentSettings settings = 1;
+}
+
+message UpdateMailboxAgentSettingsRequest {
+  string mailbox_name = 1;
+  string system_prompt = 2;
+  repeated string enabled_tools = 3;
+  optional string model_override = 4;
+  bool auto_draft_enabled = 5;
+  int32 max_tool_steps = 6;
+  int32 tool_timeout_sec = 7;
+  bool enabled_tools_present = 8;
+}
+
+message UpdateMailboxAgentSettingsResponse {
+  MailboxAgentSettings settings = 1;
+}
+
+message Draft {
+  string id = 1;
+  string mailbox_id = 2;
+  optional string conversation_id = 3;
+  optional string source_message_id = 4;
+  optional string thread_rfc_message_id = 5;
+  string status = 6;
+  string latest_revision_id = 7;
+  DraftRevision latest_revision = 8;
+  repeated DraftRevision revisions = 9;
+  optional string actor_user_id = 10;
+  optional string last_request_id = 11;
+  optional string permission_intent = 12;
+  optional string send_idempotency_key = 13;
+  optional string sent_revision_id = 14;
+  google.protobuf.Timestamp created_at = 15;
+  google.protobuf.Timestamp updated_at = 16;
+  optional string alias_id = 17;
+}
+
+message DraftRevision {
+  string id = 1;
+  string draft_id = 2;
+  int32 revision_number = 3;
+  string provenance = 4;
+  string subject = 5;
+  repeated string to = 6;
+  string body = 7;
+  optional string in_reply_to = 8;
+  optional string references = 9;
+  optional string actor_user_id = 10;
+  optional string request_id = 11;
+  optional string permission_intent = 12;
+  google.protobuf.Timestamp created_at = 13;
+}
+
+message AgentConversation {
+  string id = 1;
+  string mailbox_id = 2;
+  optional string message_id = 3;
+  optional string thread_rfc_message_id = 4;
+  string status = 5;
+  optional string created_by = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  repeated AgentConversationTurn messages = 9;
+  repeated AgentToolCall tool_calls = 10;
+  optional string last_draft_id = 11;
+  optional string alias_id = 12;
+}
+
+message AgentConversationTurn {
+  string id = 1;
+  string conversation_id = 2;
+  string role = 3;
+  string content = 4;
+  string payload_json = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message AgentToolCall {
+  string id = 1;
+  string conversation_id = 2;
+  string tool_name = 3;
+  string status = 4;
+  string args_summary_json = 5;
+  string result_summary_json = 6;
+  string policy_decision = 7;
+  optional string error_text = 8;
+  google.protobuf.Timestamp started_at = 9;
+  optional google.protobuf.Timestamp completed_at = 10;
+}
+
+message MailboxAgentSettings {
+  string mailbox_id = 1;
+  string system_prompt = 2;
+  repeated string enabled_tools = 3;
+  optional string model_override = 4;
+  bool auto_draft_enabled = 5;
+  int32 max_tool_steps = 6;
+  int32 tool_timeout_sec = 7;
+  int32 policy_version = 8;
+  optional string updated_by = 9;
+  optional string last_request_id = 10;
+  optional string permission_intent = 11;
+  optional google.protobuf.Timestamp updated_at = 12;
+}
+
+message MailboxAgentContext {
+  string mailbox_id = 1;
+}

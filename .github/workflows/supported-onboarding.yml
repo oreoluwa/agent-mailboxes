@@ -1,0 +1,37 @@
+name: Supported Onboarding
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/supported-onboarding.yml'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'go.mod'
+      - 'go.sum'
+      - 'cmd/**'
+      - 'internal/**'
+      - 'migrations/**'
+      - 'scripts/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  supported-onboarding:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify setup and private profile export
+        run: |
+          python3 scripts/test-setup-local.py
+          python3 scripts/test-onboard-agent.py
+      - name: Verify onboarding and portable client through TLS providers
+        run: python3 scripts/supported-onboarding-smoke.py
+      - name: Verify generated persistent deployment survives recreation
+        run: python3 scripts/persistent-setup-smoke.py

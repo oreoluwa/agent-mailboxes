@@ -1,0 +1,2149 @@
+openapi: 3.1.0
+info:
+  title: emaild API
+  version: 1.0.0
+  description: |
+    OpenAPI specification for the `emaild` daemon HTTP API.
+
+    `emaild` exposes two auth modes:
+    - bootstrap/admin routes can use `X-Master-Key` or an admin bearer token
+    - normal API routes use `Authorization: Bearer <token>`
+
+    Alias-scoped bearer tokens are required for inbox read/search/send operations.
+    Admin bearer tokens are not interchangeable with alias tokens on routes that
+    require an alias identity. Raw tokens returned by onboarding are shown once
+    and must be handled as secrets.
+servers:
+  - url: http://127.0.0.1:8787
+    description: Local development
+tags:
+  - name: onboarding
+  - name: admin
+  - name: inbox
+  - name: search
+  - name: outbound
+security:
+  - bearerAuth: []
+paths:
+  /onboarding:
+    get:
+      tags: [onboarding]
+      summary: Render the mailbox onboarding HTML UI
+      security: []
+      responses:
+        "200":
+          description: HTML onboarding form
+          content:
+            text/html:
+              schema:
+                type: string
+              example: "<!doctype html><html lang=\"en\"><head><title>Emaild Onboarding</title></head><body>...</body></html>"
+        "405":
+          $ref: "#/components/responses/PlainTextMethodNotAllowed"
+  /v1/admin/mailboxes:
+    get:
+      tags: [admin]
+      summary: List configured mailboxes
+      security:
+        - masterKeyHeader: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Mailbox list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminMailbox"
+              example:
+                - id: "9c615ece-f6a2-403e-a3ba-0b90ca44c1aa"
+                  name: "primary"
+                  enabled: true
+                  imap_host: "imap.zoho.com"
+                  imap_port: 993
+                  imap_tls: true
+                  smtp_host: "smtp.zoho.com"
+                  smtp_port: 465
+                  smtp_tls: true
+                  username: "primary@example.com"
+                  created_at: "2026-03-04T13:05:11Z"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+    post:
+      tags: [admin]
+      summary: Create and validate a mailbox configuration
+      security:
+        - masterKeyHeader: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMailboxRequest"
+            example:
+              name: "primary"
+              imap_host: "imap.zoho.com"
+              imap_port: 993
+              imap_tls: true
+              smtp_host: "smtp.zoho.com"
+              smtp_port: 465
+              smtp_tls: true
+              username: "primary@example.com"
+              password: "example-provider-app-password"
+      responses:
+        "200":
+          description: Mailbox created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateMailboxResponse"
+              example:
+                status: "ok"
+                mailbox_id: "9c615ece-f6a2-403e-a3ba-0b90ca44c1aa"
+                mailbox_name: "primary"
+                poller_started: true
+        "400":
+          $ref: "#/components/responses/PlainTextBadRequest"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+  /v1/admin/onboard:
+    post:
+      tags: [onboarding, admin]
+      summary: Atomically connect a mailbox and create its first agent
+      description: |
+        Validates implicit-TLS IMAP and SMTP credentials, then atomically stores
+        the encrypted provider credential, alias, and read/send token. The alias
+        must already deliver at the provider; this endpoint does not provision it.
+        The returned raw token is shown once. Responses are marked `no-store`.
+      security:
+        - masterKeyHeader: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OnboardMailboxRequest"
+            example:
+              name: "primary"
+              imap_host: "imap.provider.example"
+              imap_port: 993
+              imap_tls: true
+              smtp_host: "smtp.provider.example"
+              smtp_port: 465
+              smtp_tls: true
+              username: "owner@example.com"
+              password: "example-provider-app-password"
+              alias_email: "assistant@example.com"
+              token_name: "assistant"
+      responses:
+        "200":
+          description: Mailbox and first agent created
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentCredentialResponse"
+              example:
+                status: "ok"
+                mailbox_id: "10000000-0000-4000-8000-000000000001"
+                mailbox_name: "primary"
+                alias_email: "assistant@example.com"
+                token: "example-alias-token"
+                token_id: "20000000-0000-4000-8000-000000000001"
+                poller_started: true
+        "400":
+          $ref: "#/components/responses/PlainTextBadRequest"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+  /v1/admin/agents:
+    post:
+      tags: [onboarding, admin]
+      summary: Add or replace an agent credential on an existing mailbox
+      description: |
+        Creates an alias when absent and mints a read/send token. An existing
+        active token with the same alias and token name is rejected unless
+        `replace` is true. Replacement revokes only matching named credentials.
+        Provider credentials are not required. The returned token is shown once
+        and the response is marked `no-store`.
+      security:
+        - masterKeyHeader: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProvisionAgentRequest"
+            example:
+              mailbox_name: "primary"
+              alias_email: "research@example.com"
+              token_name: "research"
+              replace: false
+      responses:
+        "200":
+          description: Agent credential created or replaced
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentCredentialResponse"
+              example:
+                status: "ok"
+                mailbox_id: "10000000-0000-4000-8000-000000000001"
+                mailbox_name: "primary"
+                alias_email: "research@example.com"
+                token: "example-alias-token"
+                token_id: "20000000-0000-4000-8000-000000000002"
+        "400":
+          $ref: "#/components/responses/PlainTextBadRequest"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+        "403":
+          $ref: "#/components/responses/PlainTextForbidden"
+        "404":
+          $ref: "#/components/responses/PlainTextNotFound"
+        "409":
+          description: Matching active agent credential exists
+          content:
+            text/plain:
+              schema:
+                type: string
+  /v1/admin/mailboxes/enabled:
+    post:
+      tags: [admin]
+      summary: Enable or disable a mailbox
+      security:
+        - masterKeyHeader: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MailboxEnabledRequest"
+            example:
+              name: "primary"
+              enabled: false
+      responses:
+        "200":
+          description: Mailbox enabled state updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailboxEnabledResponse"
+              example:
+                status: "ok"
+                name: "primary"
+                enabled: false
+                poller_updated: true
+        "400":
+          $ref: "#/components/responses/PlainTextBadRequest"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+        "404":
+          $ref: "#/components/responses/PlainTextNotFound"
+  /v1/admin/mint-token:
+    post:
+      tags: [admin]
+      summary: Mint an admin bearer token
+      security:
+        - masterKeyHeader: []
+        - bearerAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+            example:
+              name: "ops-cli"
+      responses:
+        "200":
+          description: Admin token minted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenMintResponse"
+              example:
+                token: "example-admin-token"
+                token_id: "00000000-0000-4000-8000-000000000001"
+        "400":
+          $ref: "#/components/responses/PlainTextBadRequest"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+  /v1/status:
+    get:
+      tags: [admin]
+      summary: Get mailbox status counters
+      description: Returns a single status object or an array when multiple active mailboxes are running and no `mailbox` selector is provided.
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+      responses:
+        "200":
+          description: Status payload
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Status"
+                  - type: array
+                    items:
+                      $ref: "#/components/schemas/NamedStatus"
+              examples:
+                single:
+                  value:
+                    message_count: 418
+                    digest_count: 418
+                    alias_count: 3
+                    last_seen_uid: 9912
+                multi:
+                  value:
+                    - mailbox: "primary"
+                      status:
+                        message_count: 418
+                        digest_count: 418
+                        alias_count: 3
+                        last_seen_uid: 9912
+                    - mailbox: "support"
+                      status:
+                        message_count: 92
+                        digest_count: 92
+                        alias_count: 1
+                        last_seen_uid: 601
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+        "403":
+          $ref: "#/components/responses/PlainTextForbidden"
+        "404":
+          $ref: "#/components/responses/PlainTextNotFound"
+  /v1/admin/aliases:
+    get:
+      tags: [admin]
+      summary: List aliases for a mailbox
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+      responses:
+        "200":
+          description: Alias list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Alias"
+              example:
+                - id: "e3d44b87-9c08-432b-8da6-675f2fd2d31d"
+                  email: "x.ai@example.com"
+                  enabled: true
+                - id: "a59c7634-7354-46af-b819-2755e9b7f2f2"
+                  email: "ops@example.com"
+                  enabled: true
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+        "403":
+          $ref: "#/components/responses/PlainTextForbidden"
+        "404":
+          $ref: "#/components/responses/PlainTextNotFound"
+    post:
+      tags: [admin]
+      summary: Add an alias to a mailbox
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddAliasRequest"
+            example:
+              email: "x.ai@example.com"
+      responses:
+        "200":
+          description: Alias created or already present
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusOk"
+              example:
+                status: "ok"
+        "400":
+          $ref: "#/components/responses/PlainTextBadRequest"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+        "403":
+          $ref: "#/components/responses/PlainTextForbidden"
+        "404":
+          $ref: "#/components/responses/PlainTextNotFound"
+  /v1/admin/tokens:
+    post:
+      tags: [admin]
+      summary: Mint an alias token or admin token
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminTokenMintRequest"
+            examples:
+              aliasToken:
+                value:
+                  alias_email: "x.ai@example.com"
+                  name: "agent-client"
+                  scopes: ["read", "send"]
+              adminToken:
+                value:
+                  name: "ops-cli"
+                  admin: true
+      responses:
+        "200":
+          description: Token minted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenMintResponse"
+              example:
+                token: "example-alias-token"
+                token_id: "00000000-0000-4000-8000-000000000002"
+        "400":
+          $ref: "#/components/responses/PlainTextBadRequest"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+        "403":
+          $ref: "#/components/responses/PlainTextForbidden"
+        "404":
+          $ref: "#/components/responses/PlainTextNotFound"
+  /v1/admin/tokens/revoke:
+    post:
+      tags: [admin]
+      summary: Revoke a minted token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevokeTokenRequest"
+            example:
+              token_id: "00000000-0000-4000-8000-000000000002"
+      responses:
+        "200":
+          description: Token revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusOk"
+              example:
+                status: "ok"
+        "400":
+          $ref: "#/components/responses/PlainTextBadRequest"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+        "403":
+          $ref: "#/components/responses/PlainTextForbidden"
+  /v1/admin/sync:
+    post:
+      tags: [admin]
+      summary: Trigger an immediate sync
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+      responses:
+        "200":
+          description: Sync triggered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncResponse"
+              examples:
+                default:
+                  value:
+                    status: "ok"
+                mailbox:
+                  value:
+                    status: "ok"
+                    mailbox: "primary"
+        "400":
+          $ref: "#/components/responses/PlainTextBadRequest"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+        "403":
+          $ref: "#/components/responses/PlainTextForbidden"
+        "404":
+          $ref: "#/components/responses/PlainTextNotFound"
+  /v1/inbox/list:
+    get:
+      tags: [inbox]
+      summary: List inbox messages visible to an alias token
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+        - $ref: "#/components/parameters/FolderQuery"
+        - $ref: "#/components/parameters/UnreadQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: Message summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ListItem"
+              example:
+                - msg_id: "cbf7ad3a-36c3-4ff7-b4a8-7930f6b279e9"
+                  folder: "INBOX"
+                  received_at: "2026-03-03T21:17:12Z"
+                  from:
+                    name: "Acme Billing"
+                    email: "billing@acme.test"
+                  subject: "Invoice overdue"
+                  seen: false
+                  digest:
+                    model_name: "gpt-4.1-mini"
+                    summary_short: "Overdue invoice reminder for March retainer."
+                    summary_bullets:
+                      - "Invoice INV-2038 is 7 days overdue"
+                      - "Payment link is included"
+                    intent: "payment reminder"
+                    priority: "medium"
+                    required_action: "Review and pay or route to finance"
+                    suggested_next_step: "Forward to accounting"
+                    extracted_entities:
+                      invoice_number: "INV-2038"
+                      amount: "$2,500.00"
+                    confidence: 0.94
+                  attachments_count: 1
+                  body_state: "ready"
+                  thread:
+                    message_id: "<msg-2038@acme.test>"
+        "400":
+          $ref: "#/components/responses/PlainTextBadRequest"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+        "403":
+          $ref: "#/components/responses/PlainTextForbidden"
+  /v1/inbox/read:
+    get:
+      tags: [inbox]
+      summary: Read a full message record
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+        - $ref: "#/components/parameters/MessageIdQuery"
+      responses:
+        "200":
+          description: Message details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+              example:
+                msg_id: "cbf7ad3a-36c3-4ff7-b4a8-7930f6b279e9"
+                rfc_message_id: "<msg-2038@acme.test>"
+                received_at: "2026-03-03T21:17:12Z"
+                sent_date: "2026-03-03T21:16:58Z"
+                from_email: "billing@acme.test"
+                from_name: "Acme Billing"
+                subject: "Invoice overdue"
+                snippet: "Your March invoice is now overdue..."
+                body_state: "ready"
+                digest:
+                  model_name: "gpt-4.1-mini"
+                  summary_short: "Overdue invoice reminder for March retainer."
+                  summary_bullets:
+                    - "Invoice INV-2038 is 7 days overdue"
+                    - "Payment link is included"
+                  intent: "payment reminder"
+                  priority: "medium"
+                  required_action: "Review and pay or route to finance"
+                  suggested_next_step: "Forward to accounting"
+                  extracted_entities:
+                    invoice_number: "INV-2038"
+                    amount: "$2,500.00"
+                  confidence: 0.94
+                attachments:
+                  - id: "43a9b8fb-b98a-4da5-b80e-dc63131c8cad"
+                    message_id: "cbf7ad3a-36c3-4ff7-b4a8-7930f6b279e9"
+                    filename: "invoice.pdf"
+                    mime: "application/pdf"
+                    size_bytes: 183112
+                    storage_path: "s3://attachments/primary/cbf7ad3a/invoice.pdf"
+                    created_at: "2026-03-03T21:17:14Z"
+                thread:
+                  message_id: "<msg-2038@acme.test>"
+                from:
+                  name: "Acme Billing"
+                  email: "billing@acme.test"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+        "403":
+          $ref: "#/components/responses/PlainTextForbidden"
+        "404":
+          $ref: "#/components/responses/PlainTextNotFound"
+  /v1/inbox/body:
+    get:
+      tags: [inbox]
+      summary: Fetch extracted message body
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+        - $ref: "#/components/parameters/MessageIdQuery"
+      responses:
+        "200":
+          description: Message body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Body"
+              example:
+                message_id: "cbf7ad3a-36c3-4ff7-b4a8-7930f6b279e9"
+                text_plain: "Hi team,\n\nInvoice INV-2038 is overdue..."
+                text_html: "<p>Hi team,</p><p>Invoice <strong>INV-2038</strong> is overdue...</p>"
+                extracted_text: "Hi team, Invoice INV-2038 is overdue..."
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+        "403":
+          $ref: "#/components/responses/PlainTextForbidden"
+        "404":
+          $ref: "#/components/responses/PlainTextNotFound"
+  /v1/inbox/raw:
+    get:
+      tags: [inbox]
+      summary: Fetch raw RFC822 message bytes
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+        - $ref: "#/components/parameters/MessageIdQuery"
+      responses:
+        "200":
+          description: Raw message
+          content:
+            message/rfc822:
+              schema:
+                type: string
+                format: binary
+              example: |-
+                From: billing@acme.test
+                Subject: Invoice overdue
+                Date: Tue, 03 Mar 2026 21:16:58 +0000
+                Message-ID: <msg-2038@acme.test>
+                MIME-Version: 1.0
+                Content-Type: text/plain; charset=utf-8
+
+                Hi team,
+                Invoice INV-2038 is overdue.
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+        "403":
+          $ref: "#/components/responses/PlainTextForbidden"
+        "404":
+          $ref: "#/components/responses/PlainTextNotFound"
+  /v1/inbox/ack:
+    post:
+      tags: [inbox]
+      summary: Acknowledge a message for the current alias token
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AckRequest"
+            example:
+              message_id: "cbf7ad3a-36c3-4ff7-b4a8-7930f6b279e9"
+      responses:
+        "200":
+          description: Ack recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusOk"
+              example:
+                status: "ok"
+        "400":
+          $ref: "#/components/responses/PlainTextBadRequest"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+        "403":
+          $ref: "#/components/responses/PlainTextForbidden"
+  /v1/search:
+    get:
+      tags: [search]
+      summary: Search visible messages with simple query text
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+        - name: q
+          in: query
+          schema:
+            type: string
+          description: Free-text search query
+        - $ref: "#/components/parameters/FolderQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ListItem"
+              example:
+                - msg_id: "cbf7ad3a-36c3-4ff7-b4a8-7930f6b279e9"
+                  folder: "INBOX"
+                  received_at: "2026-03-03T21:17:12Z"
+                  from:
+                    email: "billing@acme.test"
+                  subject: "Invoice overdue"
+                  seen: false
+                  digest:
+                    model_name: "gpt-4.1-mini"
+                    summary_short: "Overdue invoice reminder for March retainer."
+                    summary_bullets:
+                      - "Invoice INV-2038 is 7 days overdue"
+                    intent: "payment reminder"
+                    priority: "medium"
+                    required_action: "Review and pay or route to finance"
+                    suggested_next_step: "Forward to accounting"
+                    extracted_entities: {}
+                    confidence: 0.94
+                  attachments_count: 1
+                  body_state: "ready"
+                  thread:
+                    message_id: "<msg-2038@acme.test>"
+        "400":
+          $ref: "#/components/responses/PlainTextBadRequest"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+        "403":
+          $ref: "#/components/responses/PlainTextForbidden"
+  /v1/search/query:
+    post:
+      tags: [search]
+      summary: Search with structured filters
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchRequest"
+            example:
+              folder: "INBOX"
+              limit: 25
+              mode: "hybrid"
+              parser_mode: "fallback"
+              intent:
+                text: "invoice overdue"
+                body_terms: ["chargeback"]
+                header_terms:
+                  subject: ["invoice"]
+              filters:
+                headers:
+                  from: ["billing@acme.test"]
+                  subject: ["invoice"]
+                flags:
+                  without: ["seen"]
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ListItem"
+              example:
+                - msg_id: "cbf7ad3a-36c3-4ff7-b4a8-7930f6b279e9"
+                  folder: "INBOX"
+                  received_at: "2026-03-03T21:17:12Z"
+                  from:
+                    email: "billing@acme.test"
+                  subject: "Invoice overdue"
+                  seen: false
+                  digest:
+                    model_name: "gpt-4.1-mini"
+                    summary_short: "Overdue invoice reminder for March retainer."
+                    summary_bullets:
+                      - "Invoice INV-2038 is 7 days overdue"
+                    intent: "payment reminder"
+                    priority: "medium"
+                    required_action: "Review and pay or route to finance"
+                    suggested_next_step: "Forward to accounting"
+                    extracted_entities: {}
+                    confidence: 0.94
+                  attachments_count: 1
+                  body_state: "ready"
+                  thread:
+                    message_id: "<msg-2038@acme.test>"
+        "400":
+          $ref: "#/components/responses/PlainTextBadRequest"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+        "403":
+          $ref: "#/components/responses/PlainTextForbidden"
+  /v1/send:
+    post:
+      tags: [outbound]
+      summary: Queue a plain-text outbound message
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendRequest"
+            example:
+              to: ["finance@example.com"]
+              subject: "Invoice follow-up"
+              body: "Please review INV-2038 and let me know the payment status."
+              idempotency_key: "send-2038-followup"
+      responses:
+        "200":
+          description: Outbound message accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueuedResponse"
+              example:
+                status: "queued"
+                job_id: "139217ef-cfd5-475c-83b6-ab647af4da7c"
+        "400":
+          $ref: "#/components/responses/PlainTextBadRequest"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+        "403":
+          $ref: "#/components/responses/PlainTextForbidden"
+  /v1/send/raw:
+    post:
+      tags: [outbound]
+      summary: Queue a raw RFC822 outbound message
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendRawRequest"
+            example:
+              from: "x.ai@example.com"
+              to: ["finance@example.com"]
+              raw_base64: "RnJvbTogeC5haUBleGFtcGxlLmNvbQ0KU3ViamVjdDogUmF3IHVwZGF0ZQ0KDQpIZWxsby4="
+              idempotency_key: "example-1"
+      responses:
+        "200":
+          description: Raw outbound message accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueuedResponse"
+              example:
+                status: "queued"
+                job_id: "f84fd48b-8616-4b70-83e2-32a4576b0c88"
+        "400":
+          $ref: "#/components/responses/PlainTextBadRequest"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+        "403":
+          $ref: "#/components/responses/PlainTextForbidden"
+  /v1/reply:
+    post:
+      tags: [outbound]
+      summary: Queue a reply to an existing message
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplyRequest"
+            example:
+              message_id: "cbf7ad3a-36c3-4ff7-b4a8-7930f6b279e9"
+              body: "Thanks, forwarding this to accounting today."
+              idempotency_key: "reply-2038-1"
+      responses:
+        "200":
+          description: Reply accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueuedResponse"
+              example:
+                status: "queued"
+                job_id: "7e3100af-1b37-4b7d-84a1-df54d8613f2b"
+        "400":
+          $ref: "#/components/responses/PlainTextBadRequest"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+        "403":
+          $ref: "#/components/responses/PlainTextForbidden"
+  /v1/drafts:
+    get:
+      tags: [agentic-inbox]
+      summary: List reviewed drafts for a mailbox
+      description: Bounded list with only the latest revision per draft; use draft detail for full history.
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+        - in: query
+          name: source_message_id
+          description: Source message UUID; message_id is accepted as an alias.
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: status
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 100
+            maximum: 200
+      responses:
+        "200":
+          description: Draft list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Draft"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+        "403":
+          $ref: "#/components/responses/PlainTextForbidden"
+  /v1/drafts/create:
+    post:
+      tags: [agentic-inbox]
+      summary: Create a reviewed draft
+      description: Requires alias bearer auth plus a valid actor envelope in `X-Agent-Actor-*` headers. AI may create drafts but cannot send mail directly.
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDraftRequest"
+      responses:
+        "200":
+          description: Draft created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Draft"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+        "403":
+          $ref: "#/components/responses/PlainTextForbidden"
+  /v1/drafts/revise:
+    post:
+      tags: [agentic-inbox]
+      summary: Append a new immutable draft revision
+      description: Requires alias bearer auth plus a valid actor envelope in `X-Agent-Actor-*` headers.
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviseDraftRequest"
+      responses:
+        "200":
+          description: Draft revised
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Draft"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+  /v1/drafts/discard:
+    post:
+      tags: [agentic-inbox]
+      summary: Discard a reviewed draft
+      description: Requires alias bearer auth plus a valid actor envelope in `X-Agent-Actor-*` headers.
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DraftIDRequest"
+      responses:
+        "200":
+          description: Draft discarded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Draft"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+  /v1/drafts/send:
+    post:
+      tags: [agentic-inbox]
+      summary: Queue send from the current reviewed draft revision
+      description: Requires alias bearer auth plus a valid actor envelope in `X-Agent-Actor-*` headers. The actor target must be `draft:<draft_id>:revision:<reviewed_revision_id>` and the supplied revision must still be current. Emaild derives idempotency as `draft:<draft_id>:revision:<n>`.
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendFromDraftRequest"
+      responses:
+        "200":
+          description: Draft send queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendFromDraftResponse"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+  /v1/agent/run:
+    post:
+      tags: [agentic-inbox]
+      summary: Run the bounded mailbox agent loop
+      description: The agent can search/read mailbox content and create or revise drafts. It cannot send mail directly. Requires read and send scopes (or admin), with a 15-minute total execution bound.
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunAgentRequest"
+      responses:
+        "200":
+          description: Agent run result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunAgentResponse"
+        "409":
+          description: Another run already owns this conversation. Retry after it finishes.
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+  /v1/agent/conversations:
+    get:
+      tags: [agentic-inbox]
+      summary: List alias-scoped conversation summaries
+      description: Messages and tool-call histories are excluded; use the detail endpoint for them.
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+        - in: query
+          name: message_id
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 100
+            maximum: 200
+      responses:
+        "200":
+          description: Bounded conversation summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AgentConversation"
+  /v1/agent/conversation:
+    get:
+      tags: [agentic-inbox]
+      summary: Read one alias-scoped conversation with its history
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+        - in: query
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Conversation detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentConversation"
+  /v1/agent/context:
+    get:
+      tags: [agentic-inbox]
+      summary: Resolve the core mailbox identifier for signed agent actions
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+      responses:
+        "200":
+          description: Non-sensitive agent request context
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mailbox_id]
+                properties:
+                  mailbox_id:
+                    type: string
+                    format: uuid
+  /v1/agent/settings:
+    get:
+      tags: [agentic-inbox]
+      summary: Read mailbox agent settings
+      description: Requires a non-alias, physical-mailbox admin bearer token plus a valid actor envelope with `permission=admin`.
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+      responses:
+        "200":
+          description: Effective mailbox agent settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailboxAgentSettings"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+    post:
+      tags: [agentic-inbox]
+      summary: Update mailbox agent settings
+      description: Requires a non-alias, physical-mailbox admin bearer token plus a valid actor envelope with `permission=admin`.
+      parameters:
+        - $ref: "#/components/parameters/MailboxQuery"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMailboxAgentSettingsRequest"
+      responses:
+        "200":
+          description: Updated mailbox agent settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailboxAgentSettings"
+        "401":
+          $ref: "#/components/responses/PlainTextUnauthorized"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Alias-scoped or admin `emaild` token.
+    masterKeyHeader:
+      type: apiKey
+      in: header
+      name: X-Master-Key
+      description: Bootstrap master key accepted on onboarding/admin endpoints.
+  parameters:
+    MailboxQuery:
+      name: mailbox
+      in: query
+      description: Mailbox selector used when multiple mailbox services are active.
+      schema:
+        type: string
+    FolderQuery:
+      name: folder
+      in: query
+      schema:
+        type: string
+      description: Mail folder name, for example `INBOX`, `Sent`, or `all` when enabled.
+    UnreadQuery:
+      name: unread
+      in: query
+      schema:
+        oneOf:
+          - type: boolean
+          - type: string
+            enum: ["0", "1", "true", "false"]
+      description: Filter to unread-only messages.
+    LimitQuery:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+      description: Maximum number of items to return.
+    MessageIdQuery:
+      name: id
+      in: query
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Internal `emaild` message id.
+  responses:
+    PlainTextBadRequest:
+      description: Bad request
+      content:
+        text/plain:
+          schema:
+            type: string
+          example: "name is required"
+    PlainTextUnauthorized:
+      description: Unauthorized
+      content:
+        text/plain:
+          schema:
+            type: string
+          example: "unauthorized"
+    PlainTextForbidden:
+      description: Forbidden
+      content:
+        text/plain:
+          schema:
+            type: string
+          example: "forbidden"
+    PlainTextNotFound:
+      description: Not found
+      content:
+        text/plain:
+          schema:
+            type: string
+          example: "not found"
+    PlainTextMethodNotAllowed:
+      description: Method not allowed
+      content:
+        text/plain:
+          schema:
+            type: string
+          example: "Method Not Allowed"
+  schemas:
+    AdminMailbox:
+      type: object
+      required: [id, name, enabled, imap_host, imap_port, imap_tls, smtp_host, smtp_port, smtp_tls, username, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        enabled:
+          type: boolean
+        imap_host:
+          type: string
+        imap_port:
+          type: integer
+        imap_tls:
+          type: boolean
+        smtp_host:
+          type: string
+        smtp_port:
+          type: integer
+        smtp_tls:
+          type: boolean
+        username:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    CreateMailboxRequest:
+      type: object
+      required: [name, imap_host, imap_port, imap_tls, smtp_host, smtp_port, smtp_tls, username, password]
+      properties:
+        name:
+          type: string
+        imap_host:
+          type: string
+        imap_port:
+          type: integer
+        imap_tls:
+          type: boolean
+        smtp_host:
+          type: string
+        smtp_port:
+          type: integer
+        smtp_tls:
+          type: boolean
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+    CreateMailboxResponse:
+      type: object
+      required: [status, mailbox_id, mailbox_name, poller_started]
+      properties:
+        status:
+          type: string
+          const: "ok"
+        mailbox_id:
+          type: string
+          format: uuid
+        mailbox_name:
+          type: string
+        poller_started:
+          type: boolean
+        poller_error:
+          type: string
+    OnboardMailboxRequest:
+      type: object
+      additionalProperties: false
+      required: [name, imap_host, imap_port, imap_tls, smtp_host, smtp_port, smtp_tls, username, password, alias_email, token_name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        imap_host:
+          type: string
+          minLength: 1
+          maxLength: 253
+        imap_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        imap_tls:
+          type: boolean
+          const: true
+        smtp_host:
+          type: string
+          minLength: 1
+          maxLength: 253
+        smtp_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        smtp_tls:
+          type: boolean
+          const: true
+        username:
+          type: string
+          minLength: 1
+          maxLength: 320
+        password:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 16384
+        alias_email:
+          type: string
+          format: email
+          description: Exact provider-delivered address assigned to the agent.
+        token_name:
+          type: string
+          minLength: 1
+          maxLength: 200
+    ProvisionAgentRequest:
+      type: object
+      additionalProperties: false
+      required: [mailbox_name, alias_email, token_name]
+      properties:
+        mailbox_name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        alias_email:
+          type: string
+          format: email
+        token_name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        replace:
+          type: boolean
+          default: false
+          description: Revoke and replace only active credentials with this alias/name.
+    AgentCredentialResponse:
+      type: object
+      required: [status, mailbox_id, mailbox_name, alias_email, token, token_id]
+      properties:
+        status:
+          type: string
+          const: ok
+        mailbox_id:
+          type: string
+          format: uuid
+        mailbox_name:
+          type: string
+        alias_email:
+          type: string
+          format: email
+        token:
+          type: string
+          description: Raw alias-scoped token returned once; store as a secret.
+        token_id:
+          type: string
+          format: uuid
+        poller_started:
+          type: boolean
+          description: Present for initial mailbox onboarding.
+        poller_error:
+          type: string
+          description: Present when onboarding committed but activation failed.
+    MailboxEnabledRequest:
+      type: object
+      required: [name, enabled]
+      properties:
+        name:
+          type: string
+        enabled:
+          type: boolean
+    MailboxEnabledResponse:
+      type: object
+      required: [status, name, enabled, poller_updated]
+      properties:
+        status:
+          type: string
+          const: "ok"
+        name:
+          type: string
+        enabled:
+          type: boolean
+        poller_updated:
+          type: boolean
+        poller_error:
+          type: string
+    Status:
+      type: object
+      required: [message_count, digest_count, alias_count, last_seen_uid]
+      properties:
+        message_count:
+          type: integer
+        digest_count:
+          type: integer
+        alias_count:
+          type: integer
+        last_seen_uid:
+          type: integer
+    NamedStatus:
+      type: object
+      required: [mailbox, status]
+      properties:
+        mailbox:
+          type: string
+        status:
+          $ref: "#/components/schemas/Status"
+    Alias:
+      type: object
+      required: [id, email, enabled]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        enabled:
+          type: boolean
+    AddAliasRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+    AdminTokenMintRequest:
+      type: object
+      properties:
+        alias_email:
+          type: string
+          format: email
+        name:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+            enum: [read, send, admin]
+        admin:
+          type: boolean
+          default: false
+    TokenMintResponse:
+      type: object
+      required: [token, token_id]
+      properties:
+        token:
+          type: string
+        token_id:
+          type: string
+          format: uuid
+    RevokeTokenRequest:
+      type: object
+      required: [token_id]
+      properties:
+        token_id:
+          type: string
+          format: uuid
+    SyncResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: "ok"
+        mailbox:
+          type: string
+    StatusOk:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: "ok"
+    From:
+      type: object
+      required: [email]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+    Thread:
+      type: object
+      required: [message_id]
+      properties:
+        message_id:
+          type: string
+        in_reply_to:
+          type: string
+        references:
+          type: string
+    Attachment:
+      type: object
+      required: [filename, mime, size_bytes]
+      properties:
+        id:
+          type: string
+          format: uuid
+        message_id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+        mime:
+          type: string
+        size_bytes:
+          type: integer
+        storage_path:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    Digest:
+      type: object
+      required: [model_name, summary_short, summary_bullets, intent, priority, required_action, suggested_next_step, extracted_entities, confidence]
+      properties:
+        message_id:
+          type: string
+          format: uuid
+        model_name:
+          type: string
+        summary_short:
+          type: string
+        summary_bullets:
+          type: array
+          items:
+            type: string
+        intent:
+          type: string
+        priority:
+          type: string
+        required_action:
+          type: string
+        suggested_next_step:
+          type: string
+        extracted_entities:
+          type: object
+          additionalProperties: true
+        confidence:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+    ListItem:
+      type: object
+      required: [msg_id, folder, received_at, from, seen, digest, attachments_count, body_state, thread]
+      properties:
+        msg_id:
+          type: string
+          format: uuid
+        folder:
+          type: string
+        received_at:
+          type: string
+          format: date-time
+        from:
+          $ref: "#/components/schemas/From"
+        subject:
+          type: string
+        seen:
+          type: boolean
+        digest:
+          $ref: "#/components/schemas/Digest"
+        attachments_count:
+          type: integer
+        body_state:
+          type: string
+        thread:
+          $ref: "#/components/schemas/Thread"
+    Message:
+      type: object
+      required: [msg_id, received_at, from_email, body_state, thread, from]
+      properties:
+        msg_id:
+          type: string
+          format: uuid
+        rfc_message_id:
+          type: string
+        received_at:
+          type: string
+          format: date-time
+        sent_date:
+          type: string
+          format: date-time
+        from_email:
+          type: string
+          format: email
+        from_name:
+          type: string
+        subject:
+          type: string
+        snippet:
+          type: string
+        body_state:
+          type: string
+        in_reply_to:
+          type: string
+        references:
+          type: string
+        digest:
+          $ref: "#/components/schemas/Digest"
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Attachment"
+        thread:
+          $ref: "#/components/schemas/Thread"
+        from:
+          $ref: "#/components/schemas/From"
+    Body:
+      type: object
+      required: [message_id]
+      properties:
+        message_id:
+          type: string
+          format: uuid
+        text_plain:
+          type: string
+        text_html:
+          type: string
+        extracted_text:
+          type: string
+    AckRequest:
+      type: object
+      required: [message_id]
+      properties:
+        message_id:
+          type: string
+          format: uuid
+    SearchRequest:
+      type: object
+      properties:
+        folder:
+          type: string
+        limit:
+          type: integer
+        mode:
+          type: string
+          enum: [hybrid, keyword, semantic]
+        parser_mode:
+          type: string
+        filters:
+          $ref: "#/components/schemas/SearchFilters"
+        intent:
+          $ref: "#/components/schemas/SearchIntent"
+    SearchFilters:
+      type: object
+      properties:
+        headers:
+          $ref: "#/components/schemas/SearchHeaderFilters"
+        flags:
+          $ref: "#/components/schemas/SearchFlagFilters"
+        date:
+          $ref: "#/components/schemas/SearchDateFilters"
+        size:
+          $ref: "#/components/schemas/SearchSizeFilters"
+        logic:
+          $ref: "#/components/schemas/SearchLogic"
+    SearchHeaderFilters:
+      type: object
+      properties:
+        subject:
+          type: array
+          items:
+            type: string
+        from:
+          type: array
+          items:
+            type: string
+        to:
+          type: array
+          items:
+            type: string
+        message_id:
+          type: array
+          items:
+            type: string
+        generic:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+    SearchFlagFilters:
+      type: object
+      properties:
+        with:
+          type: array
+          items:
+            type: string
+        without:
+          type: array
+          items:
+            type: string
+    SearchDateFilters:
+      type: object
+      properties:
+        internal_since:
+          type: string
+          format: date-time
+        internal_before:
+          type: string
+          format: date-time
+        sent_since:
+          type: string
+          format: date-time
+        sent_before:
+          type: string
+          format: date-time
+        field:
+          type: string
+        range:
+          $ref: "#/components/schemas/SearchDateRange"
+        temporal:
+          $ref: "#/components/schemas/SearchTemporalFilter"
+    SearchDateRange:
+      type: object
+      properties:
+        start:
+          $ref: "#/components/schemas/SearchTemporalPoint"
+        end:
+          $ref: "#/components/schemas/SearchTemporalPoint"
+        end_inclusive:
+          type: boolean
+    SearchTemporalPoint:
+      type: object
+      properties:
+        type:
+          type: string
+        value:
+          type: string
+        timestamp:
+          type: string
+        date:
+          type: string
+        direction:
+          type: string
+        amount:
+          type: integer
+        unit:
+          type: string
+        weekday:
+          type: string
+        period:
+          type: string
+        boundary:
+          type: string
+        snap:
+          type: string
+        timezone:
+          type: string
+    SearchTemporalFilter:
+      type: object
+      properties:
+        kind:
+          type: string
+        value:
+          type: string
+        amount:
+          type: integer
+        unit:
+          type: string
+        field:
+          type: string
+        timezone:
+          type: string
+        date:
+          type: string
+    SearchSizeFilters:
+      type: object
+      properties:
+        larger:
+          type: integer
+        smaller:
+          type: integer
+    SearchLogic:
+      type: object
+      properties:
+        not:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchSubquery"
+        or:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchOrClause"
+    SearchSubquery:
+      type: object
+      properties:
+        filters:
+          $ref: "#/components/schemas/SearchFilters"
+        intent:
+          $ref: "#/components/schemas/SearchIntent"
+    SearchOrClause:
+      type: object
+      properties:
+        any:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchSubquery"
+    SearchIntent:
+      type: object
+      properties:
+        text:
+          type: string
+        body_terms:
+          type: array
+          items:
+            type: string
+        header_terms:
+          $ref: "#/components/schemas/SearchHeaderIntent"
+    SearchHeaderIntent:
+      type: object
+      properties:
+        subject:
+          type: array
+          items:
+            type: string
+        from:
+          type: array
+          items:
+            type: string
+        to:
+          type: array
+          items:
+            type: string
+    SendRequest:
+      type: object
+      required: [to, subject, body]
+      properties:
+        to:
+          type: array
+          items:
+            type: string
+            format: email
+        subject:
+          type: string
+        body:
+          type: string
+        idempotency_key:
+          type: string
+    SendRawRequest:
+      type: object
+      required: [from, to, raw_base64]
+      properties:
+        from:
+          type: string
+          format: email
+        to:
+          type: array
+          items:
+            type: string
+            format: email
+        raw_base64:
+          type: string
+          description: Base64-encoded RFC822 message.
+        idempotency_key:
+          type: string
+    ReplyRequest:
+      type: object
+      required: [message_id, body]
+      properties:
+        message_id:
+          type: string
+          format: uuid
+        body:
+          type: string
+        idempotency_key:
+          type: string
+    DraftIDRequest:
+      type: object
+      required: [draft_id]
+      properties:
+        draft_id:
+          type: string
+          format: uuid
+    CreateDraftRequest:
+      type: object
+      required: [body]
+      properties:
+        source_message_id:
+          type: string
+          format: uuid
+        conversation_id:
+          type: string
+          format: uuid
+        subject:
+          type: string
+        to:
+          type: array
+          items:
+            type: string
+            format: email
+        body:
+          type: string
+    SendFromDraftRequest:
+      type: object
+      required: [draft_id, reviewed_revision_id]
+      properties:
+        draft_id:
+          type: string
+          format: uuid
+        reviewed_revision_id:
+          type: string
+          format: uuid
+          description: Exact latest_revision_id reviewed by the operator; stale revisions are rejected.
+    ReviseDraftRequest:
+      allOf:
+        - $ref: "#/components/schemas/DraftIDRequest"
+        - type: object
+          required: [body]
+          properties:
+            subject:
+              type: string
+            to:
+              type: array
+              items:
+                type: string
+                format: email
+            body:
+              type: string
+    DraftRevision:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        draft_id:
+          type: string
+          format: uuid
+        revision_number:
+          type: integer
+        provenance:
+          type: string
+        subject:
+          type: string
+        to:
+          type: array
+          items:
+            type: string
+        body:
+          type: string
+        in_reply_to:
+          type: string
+        references:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    Draft:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        mailbox_id:
+          type: string
+          format: uuid
+        alias_id:
+          type: string
+          format: uuid
+          description: Owning alias, omitted for legacy or operator-only records.
+        conversation_id:
+          type: string
+          format: uuid
+        source_message_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        latest_revision_id:
+          type: string
+          format: uuid
+        latest_revision:
+          $ref: "#/components/schemas/DraftRevision"
+        revisions:
+          type: array
+          items:
+            $ref: "#/components/schemas/DraftRevision"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    AgentConversationTurn:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+        content:
+          type: string
+        payload:
+          type: object
+    AgentToolCall:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        tool_name:
+          type: string
+        status:
+          type: string
+        policy_decision:
+          type: string
+    AgentConversation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        mailbox_id:
+          type: string
+          format: uuid
+        alias_id:
+          type: string
+          format: uuid
+          description: Owning alias, omitted for legacy or operator-only records.
+        message_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentConversationTurn"
+        tool_calls:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentToolCall"
+    RunAgentRequest:
+      type: object
+      properties:
+        conversation_id:
+          type: string
+          format: uuid
+        message_id:
+          type: string
+          format: uuid
+        prompt:
+          type: string
+        actor_user_id:
+          type: string
+    RunAgentResponse:
+      type: object
+      properties:
+        conversation:
+          $ref: "#/components/schemas/AgentConversation"
+        draft:
+          $ref: "#/components/schemas/Draft"
+    MailboxAgentSettings:
+      type: object
+      properties:
+        mailbox_id:
+          type: string
+          format: uuid
+        system_prompt:
+          type: string
+        enabled_tools:
+          description: Omission preserves the existing allowlist; an explicit empty array disables all tools.
+          type: array
+          items:
+            type: string
+        model_override:
+          type: string
+        auto_draft_enabled:
+          type: boolean
+        max_tool_steps:
+          type: integer
+        tool_timeout_sec:
+          type: integer
+        policy_version:
+          type: integer
+    UpdateMailboxAgentSettingsRequest:
+      type: object
+      properties:
+        system_prompt:
+          type: string
+        enabled_tools:
+          description: Omission preserves the existing allowlist; an explicit empty array disables all tools.
+          type: array
+          items:
+            type: string
+        model_override:
+          type: string
+        auto_draft_enabled:
+          type: boolean
+        max_tool_steps:
+          type: integer
+        tool_timeout_sec:
+          type: integer
+    SendFromDraftResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        job_id:
+          type: string
+          format: uuid
+        draft:
+          $ref: "#/components/schemas/Draft"
+        idempotent:
+          type: boolean
+    QueuedResponse:
+      type: object
+      required: [status, job_id]
+      properties:
+        status:
+          type: string
+          const: "queued"
+        job_id:
+          type: string
+          format: uuid

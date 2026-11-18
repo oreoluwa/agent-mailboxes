@@ -1,0 +1,81 @@
+{
+  "mailbox": {
+    "name": "primary",
+    "imap_host": "127.0.0.1",
+    "imap_port": 53143,
+    "imap_tls": false,
+    "smtp_host": "127.0.0.1",
+    "smtp_port": 53025,
+    "smtp_tls": false,
+    "username": "primary",
+    "password": "app-password"
+  },
+  "aliases": [
+    {
+      "email": "x.ai@example.com",
+      "token_name": "fixture-x",
+      "token_scopes": ["read", "send"]
+    },
+    {
+      "email": "y.ai@example.com",
+      "token_name": "fixture-y",
+      "token_scopes": ["read", "send"]
+    }
+  ],
+  "messages": [
+    {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "imap_uid": 1,
+      "rfc_message_id": "<gateway-smoke-1@example.com>",
+      "folder": "inbox",
+      "from_email": "sender@example.com",
+      "from_name": "Synthetic Sender",
+      "subject": "Seed message",
+      "smtp_to": ["primary@example.com"],
+      "delivered_to": "x.ai@example.com",
+      "sent_date": "2026-01-02T03:04:05Z",
+      "internal_date": "2026-01-02T03:04:05Z",
+      "text_plain": "This is synthetic mail used by the gateway smoke test.",
+      "text_html": "<p>This is synthetic mail used by the gateway smoke test.</p>",
+      "audience_aliases": ["x.ai@example.com"],
+      "seen_aliases": [],
+      "digest": {
+        "model_name": "synthetic-seed-model",
+        "summary_short": "Synthetic gateway smoke message",
+        "summary_bullets": ["Contains only deterministic test data"],
+        "intent": "inform",
+        "priority": "low",
+        "required_action": "none",
+        "suggested_next_step": "archive",
+        "extracted_entities": {},
+        "confidence": 1.0
+      }
+    }
+  ],
+  "gateway": {
+    "user": {
+      "id": "user_fixture_1",
+      "email": "operator@example.com"
+    },
+    "team": {
+      "id": "77777777-7777-4777-8777-777777777777",
+      "name": "Synthetic Fixture Team"
+    },
+    "shared_mailbox": {
+      "id": "88888888-8888-4888-8888-888888888888",
+      "mailbox_name": "primary",
+      "alias_email": "x.ai@example.com",
+      "can_read": true,
+      "can_send": true,
+      "can_ack": true
+    },
+    "session": {
+      "id": "33333333-3333-4333-8333-333333333333",
+      "csrf_token": "44444444-4444-4444-8444-444444444444"
+    },
+    "app_password": {
+      "id": "66666666-6666-4666-8666-666666666666",
+      "label": "Synthetic Mail Client"
+    }
+  }
+}

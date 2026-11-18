@@ -1,0 +1,65 @@
+# Binaries and build artifacts
+bin/
+dist/
+/emaild
+/mailbridge
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.out
+
+# Go
+.gocache/
+.gocache-local/
+.gomodcache/
+.gomodcache-local/
+vendor/
+*.test
+coverage.out
+coverage.html
+*.coverprofile
+
+# Python test helpers
+__pycache__/
+*.py[cod]
+
+# Logs and local run artifacts
+*.log
+.emaild-smoke.log
+.emaild-uigw.pid
+tmp/
+temp/
+*.tmp
+test-artifacts/
+.omx/
+
+# IDE and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment and secrets
+.env
+.env.gateway
+.env.mailbridge
+.env.uigateway
+.env.uigateway.next
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Next.js
+ui-gateway-next/node_modules/
+ui-gateway-next/.next/
+
+# Docker (optional local overrides)
+docker-compose.override.yml
