@@ -38,6 +38,7 @@ type Server struct {
 	AllowInboxAll              bool
 	OnMailboxCreated           func(context.Context, store.Mailbox) (bool, error)
 	OnMailboxEnabled           func(context.Context, string, bool) (bool, error)
+	LoadMailboxService         func(context.Context, string, string) (*service.Service, error)
 	ValidateMailboxCredentials func(context.Context, store.MailboxCreds) error
 	mu                         sync.RWMutex
 }
@@ -134,6 +135,9 @@ func (s *Server) authService() *service.Service {
 	for _, svc := range s.ServicesByName {
 		return svc
 	}
+	if s.LoadMailboxService != nil && s.Store != nil {
+		return &service.Service{Store: s.Store}
+	}
 	return nil
 }
 
@@ -169,8 +173,43 @@ func (s *Server) serviceForMailbox(name string) (*service.Service, error) {
 	return svc, nil
 }
 
-func (s *Server) mailboxIDForRequest(r *http.Request) (string, error) {
-	svc, err := s.serviceForMailbox(s.requestedMailboxName(r))
+func (s *Server) serviceForMailboxContext(ctx context.Context, name string) (*service.Service, error) {
+	svc, err := s.serviceForMailbox(name)
+	if err == nil || !errors.Is(err, store.ErrNotFound) || strings.TrimSpace(name) == "" {
+		return svc, err
+	}
+	return s.loadMailboxService(ctx, "", name)
+}
+
+func (s *Server) loadMailboxService(ctx context.Context, mailboxID, mailboxName string) (*service.Service, error) {
+	if s.LoadMailboxService == nil {
+		return nil, store.ErrNotFound
+	}
+	svc, err := s.LoadMailboxService(ctx, strings.TrimSpace(mailboxID), strings.TrimSpace(mailboxName))
+	if err != nil {
+		return nil, err
+	}
+	if svc == nil || (mailboxID != "" && svc.MailboxID != mailboxID) || (mailboxName != "" && svc.MailboxName != mailboxName) {
+		return nil, store.ErrNotFound
+	}
+	s.RegisterMailboxService(svc.MailboxName, svc)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if mailboxID != "" {
+		if loaded, ok := s.ServicesByMailboxID[mailboxID]; ok {
+			return loaded, nil
+		}
+	}
+	if mailboxName != "" {
+		if loaded, ok := s.ServicesByName[mailboxName]; ok {
+			return loaded, nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
+func (s *Server) mailboxIDForRequest(ctx context.Context, r *http.Request) (string, error) {
+	svc, err := s.serviceForMailboxContext(ctx, s.requestedMailboxName(r))
 	if err != nil {
 		return "", err
 	}
@@ -194,9 +233,9 @@ func (s *Server) serviceForClaims(ctx context.Context, claims model.TokenClaims,
 			return svc, nil
 		}
 		s.mu.RUnlock()
-		return nil, store.ErrNotFound
+		return s.loadMailboxService(ctx, mailboxID, "")
 	}
-	return s.serviceForMailbox(s.requestedMailboxName(r))
+	return s.serviceForMailboxContext(ctx, s.requestedMailboxName(r))
 }
 
 func (s *Server) RegisterMailboxService(name string, svc *service.Service) bool {
@@ -810,7 +849,7 @@ func (s *Server) mintAdminToken(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) status(w http.ResponseWriter, r *http.Request, claims model.TokenClaims) {
 	if name := s.requestedMailboxName(r); name != "" {
-		svc, err := s.serviceForMailbox(name)
+		svc, err := s.serviceForMailboxContext(r.Context(), name)
 		if err != nil {
 			writeErr(w, err)
 			return
@@ -863,7 +902,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request, claims model.Tok
 }
 
 func (s *Server) aliases(w http.ResponseWriter, r *http.Request, claims model.TokenClaims) {
-	mailboxID, err := s.mailboxIDForRequest(r)
+	mailboxID, err := s.mailboxIDForRequest(r.Context(), r)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -923,7 +962,7 @@ func (s *Server) tokens(w http.ResponseWriter, r *http.Request, claims model.Tok
 		writeJSON(w, map[string]string{"token": tok, "token_id": id})
 		return
 	}
-	svc, err := s.serviceForMailbox(s.requestedMailboxName(r))
+	svc, err := s.serviceForMailboxContext(r.Context(), s.requestedMailboxName(r))
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -959,7 +998,7 @@ func (s *Server) syncNow(w http.ResponseWriter, r *http.Request, claims model.To
 	syncCtx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 	if name := s.requestedMailboxName(r); name != "" {
-		svc, err := s.serviceForMailbox(name)
+		svc, err := s.serviceForMailboxContext(r.Context(), name)
 		if err != nil {
 			writeErr(w, err)
 			return

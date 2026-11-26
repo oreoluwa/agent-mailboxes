@@ -517,7 +517,7 @@ func runRuntime(opts runtimeOptions) {
 	if opts.shardCount > 0 && opts.shardIndex >= 0 {
 		selectedMailboxes = filterMailboxesForShard(selectedMailboxes, opts.shardIndex, opts.shardCount)
 	}
-	if setupOnly && !opts.withHTTP {
+	if rejectsEmptyRuntime(setupOnly, opts) {
 		fatal(fmt.Errorf("no mailbox configured; worker mode requires at least one enabled mailbox"))
 	}
 
@@ -644,6 +644,27 @@ func runRuntime(opts runtimeOptions) {
 		ActorEnvelopeSecret:       cfg.ActorEnvelopeSecret,
 		ActorEnvelopeReplayWindow: cfg.ActorReplayWindow,
 		AllowInboxAll:             cfg.InboxAllEnabled,
+	}
+	if enablesLazyMailboxLoading(opts) {
+		server.LoadMailboxService = func(loadCtx context.Context, mailboxID, mailboxName string) (*service.Service, error) {
+			mailboxes, err := st.ListMailboxes(loadCtx)
+			if err != nil {
+				return nil, err
+			}
+			for _, mailbox := range mailboxes {
+				if !mailbox.Enabled {
+					continue
+				}
+				if mailboxID != "" && mailbox.ID != mailboxID {
+					continue
+				}
+				if mailboxName != "" && mailbox.Name != mailboxName {
+					continue
+				}
+				return buildService(mailbox), nil
+			}
+			return nil, store.ErrNotFound
+		}
 	}
 	var httpSrv *http.Server
 	if opts.withHTTP {
@@ -789,6 +810,14 @@ func runRuntime(opts runtimeOptions) {
 
 	log.Printf("emaild worker running (mailboxes=%d, poll_interval=%s)", len(servicesByName), cfg.PollInterval)
 	<-ctx.Done()
+}
+
+func rejectsEmptyRuntime(setupOnly bool, opts runtimeOptions) bool {
+	return setupOnly && !opts.withHTTP && !opts.allMailboxes
+}
+
+func enablesLazyMailboxLoading(opts runtimeOptions) bool {
+	return opts.withHTTP && !opts.withPollers && opts.allMailboxes
 }
 
 func activateMailboxService(

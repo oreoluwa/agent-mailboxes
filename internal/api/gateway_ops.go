@@ -482,9 +482,9 @@ func (s *Server) serviceForClaimsMailbox(ctx context.Context, claims model.Token
 			return svc, nil
 		}
 		s.mu.RUnlock()
-		return nil, store.ErrNotFound
+		return s.loadMailboxService(ctx, mailboxID, "")
 	}
-	return s.serviceForMailbox(strings.TrimSpace(mailboxName))
+	return s.serviceForMailboxContext(ctx, strings.TrimSpace(mailboxName))
 }
 
 func (s *Server) publishBrokerEvent(svc *service.Service, eventType, messageID, subject string, owningAliasID *string, audience []string) {
