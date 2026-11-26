@@ -97,3 +97,30 @@ func TestStartConfiguredQueueWorkersHonorsHTTPOnlyMode(t *testing.T) {
 		t.Fatalf("worker startup launched %d queue worker sets, want 1", starts)
 	}
 }
+
+func TestAllMailboxesWorkerCanIdleUntilFirstMailbox(t *testing.T) {
+	if rejectsEmptyRuntime(true, runtimeOptions{allMailboxes: true, withPollers: true}) {
+		t.Fatal("all-mailboxes worker must stay alive for the mailbox reconciler")
+	}
+	if !rejectsEmptyRuntime(true, runtimeOptions{mailbox: "missing", withPollers: true}) {
+		t.Fatal("single-mailbox worker must still reject an empty database")
+	}
+	if rejectsEmptyRuntime(true, runtimeOptions{allMailboxes: true, withHTTP: true}) {
+		t.Fatal("HTTP onboarding runtime must allow an empty database")
+	}
+}
+
+func TestLazyMailboxLoadingIsLimitedToAPIOnlyAllMailboxes(t *testing.T) {
+	if !enablesLazyMailboxLoading(runtimeOptions{withHTTP: true, allMailboxes: true}) {
+		t.Fatal("API-only all-mailboxes runtime must load mailboxes discovered by other instances")
+	}
+	for _, opts := range []runtimeOptions{
+		{withHTTP: true, withPollers: true, allMailboxes: true},
+		{withHTTP: true, mailbox: "primary"},
+		{withPollers: true, allMailboxes: true},
+	} {
+		if enablesLazyMailboxLoading(opts) {
+			t.Fatalf("unexpected lazy mailbox loading for options %+v", opts)
+		}
+	}
+}
